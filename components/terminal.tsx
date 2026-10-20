@@ -485,7 +485,7 @@ export function Terminal({ client }: TerminalProps) {
         import("@xterm/xterm"),
         import("@xterm/addon-fit"),
       ]);
-      // @ts-expect-error - xterm ships its CSS via a side-effect import
+  
       await import("@xterm/xterm/css/xterm.css");
 
       if (disposed || !containerRef.current) return;
