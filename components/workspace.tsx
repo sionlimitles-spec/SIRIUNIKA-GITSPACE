@@ -4,33 +4,20 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import { Menu, RefreshCw, Terminal as TerminalIcon } from "lucide-react";
+import { Menu, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
 import { GithubClient, buildTree, toGithubError } from "@/lib/github";
-import { cn } from "@/lib/utils";
+import { useSyncPolling } from "@/lib/sync";
 import { TopBar } from "@/components/top-bar";
 import { FileTree } from "@/components/file-tree";
 import { Editor } from "@/components/editor";
 import { StatusBar } from "@/components/status-bar";
 import { Palette } from "@/components/palette";
+import { Terminal } from "@/components/terminal";
 
 type PaletteMode = "quick-open" | "commands" | "search-all" | null;
-
-function TerminalPlaceholder() {
-  return (
-    <div className="h-full flex items-center justify-center bg-muted/20 border-t border-border">
-      <div className="text-center text-xs text-muted-foreground">
-        <TerminalIcon className="mx-auto mb-2 size-5 opacity-60" />
-        <p className="font-mono">Simulated terminal</p>
-        <p className="mt-1 opacity-70">
-          Full xterm integration ships in Phase 3.
-        </p>
-      </div>
-    </div>
-  );
-}
 
 function LoadingScreen({ message }: { message: string }) {
   return (
@@ -112,7 +99,9 @@ export function Workspace() {
     });
   }, [treeQuery.error]);
 
-  // global shortcuts
+  // real-time branch polling
+  useSyncPolling(client, session?.branch, Boolean(client && session));
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
@@ -181,7 +170,6 @@ export function Workspace() {
           </div>
         ) : (
           <>
-            {/* Desktop layout */}
             <PanelGroup
               direction="horizontal"
               className="hidden md:flex h-full"
@@ -192,10 +180,7 @@ export function Workspace() {
               </Panel>
               <PanelResizeHandle className="w-px bg-border hover:bg-primary/60 transition-colors" />
               <Panel defaultSize={78}>
-                <PanelGroup
-                  direction="vertical"
-                  autoSaveId="repodeck:panels-v"
-                >
+                <PanelGroup direction="vertical" autoSaveId="repodeck:panels-v">
                   <Panel defaultSize={terminalOpen ? 70 : 100} minSize={30}>
                     <Editor client={client} />
                   </Panel>
@@ -203,7 +188,7 @@ export function Workspace() {
                     <>
                       <PanelResizeHandle className="h-px bg-border hover:bg-primary/60 transition-colors" />
                       <Panel defaultSize={30} minSize={12}>
-                        <TerminalPlaceholder />
+                        <Terminal client={client} />
                       </Panel>
                     </>
                   )}
@@ -211,14 +196,13 @@ export function Workspace() {
               </Panel>
             </PanelGroup>
 
-            {/* Mobile layout */}
             <div className="md:hidden h-full flex flex-col">
               <div className="flex-1 min-h-0">
                 <Editor client={client} />
               </div>
               {terminalOpen && (
-                <div className="h-48 shrink-0">
-                  <TerminalPlaceholder />
+                <div className="h-64 shrink-0">
+                  <Terminal client={client} />
                 </div>
               )}
             </div>
@@ -228,7 +212,6 @@ export function Workspace() {
 
       <StatusBar />
 
-      {/* Mobile tree drawer */}
       {mobileTreeOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <div
@@ -255,10 +238,7 @@ export function Workspace() {
         </div>
       )}
 
-      <Palette
-        mode={paletteMode}
-        onClose={() => setPaletteMode(null)}
-      />
+      <Palette mode={paletteMode} onClose={() => setPaletteMode(null)} />
     </div>
   );
 }
