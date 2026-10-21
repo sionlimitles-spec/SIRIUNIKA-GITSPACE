@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -37,8 +38,7 @@ import {
   type TreeNode,
 } from "@/lib/github";
 import { basename, cn, copyToClipboard } from "@/lib/utils";
-
-/* ---- file icons ---- */
+import { ingestFiles } from "@/lib/upload";
 
 const EXT_COLOR: Record<string, string> = {
   js: "text-yellow-400",
@@ -69,8 +69,6 @@ function FileIcon({ path }: { path: string }) {
   const color = EXT_COLOR[ext] ?? "text-muted-foreground";
   return <File className={cn("size-3.5 shrink-0", color)} />;
 }
-
-/* ---- context menu ---- */
 
 interface MenuState {
   x: number;
@@ -107,8 +105,11 @@ export function FileTree({ onFileOpened }: FileTreeProps) {
   const [prompt, setPrompt] = useState<PromptState>(null);
   const [promptValue, setPromptValue] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<TreeNode | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -127,7 +128,6 @@ export function FileTree({ onFileOpened }: FileTreeProps) {
     overscan: 14,
   });
 
-  // menu close on outside click / escape
   useEffect(() => {
     if (!menu) return;
     const close = () => setMenu(null);
@@ -205,6 +205,28 @@ export function FileTree({ onFileOpened }: FileTreeProps) {
     else toast.error("Could not copy path");
   }
 
+  async function handleDrop(files: File[]) {
+    if (files.length === 0) return;
+    setUploading(true);
+    try {
+      const res = await ingestFiles(files, addFile);
+      if (res.added.length > 0) {
+        toast.success(`Imported ${res.added.length} file(s)`, {
+          description:
+            res.skipped.length > 0
+              ? `${res.skipped.length} skipped`
+              : undefined,
+        });
+      } else {
+        toast.error("Nothing imported", {
+          description: `${res.skipped.length} file(s) skipped.`,
+        });
+      }
+    } finally {
+      setUploading(false);
+    }
+  }
+
   if (!treeLoaded) {
     return (
       <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
@@ -219,23 +241,31 @@ export function FileTree({ onFileOpened }: FileTreeProps) {
       <div className="flex h-full items-center justify-center px-4 text-center text-xs text-muted-foreground">
         <div>
           <p>This branch has no files yet.</p>
-          <Button
-            size="sm"
-            variant="outline"
-            className="mt-3"
-            onClick={() => openPrompt({ kind: "new-file", parent: "" })}
-          >
-            <FilePlus2 className="size-3.5" />
-            Create a file
-          </Button>
+          <div className="mt-3 flex justify-center gap-1">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => openPrompt({ kind: "new-file", parent: "" })}
+            >
+              <FilePlus2 className="size-3.5" />
+              Create
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => uploadInputRef.current?.click()}
+            >
+              <Upload className="size-3.5" />
+              Upload
+            </Button>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col bg-sidebar">
-      {/* search */}
+    <div className="relative flex h-full flex-col bg-sidebar">
       <div className="flex items-center gap-1 border-b border-border px-2 py-1.5">
         <Search className="size-3.5 shrink-0 text-muted-foreground" />
         <input
@@ -257,15 +287,31 @@ export function FileTree({ onFileOpened }: FileTreeProps) {
         )}
       </div>
 
-      {/* tree */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-auto scrollbar-thin"
+        className={cn(
+          "relative flex-1 overflow-auto scrollbar-thin",
+          dragOver && "bg-primary/5",
+        )}
         onContextMenu={(e) => {
           if (e.target === e.currentTarget) {
             e.preventDefault();
             openPrompt({ kind: "new-file", parent: "" });
           }
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!uploading) setDragOver(true);
+        }}
+        onDragLeave={(e) => {
+          if (e.currentTarget === e.target) setDragOver(false);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          if (uploading) return;
+          const files = Array.from(e.dataTransfer.files ?? []);
+          void handleDrop(files);
         }}
       >
         {rows.length === 0 ? (
@@ -345,9 +391,16 @@ export function FileTree({ onFileOpened }: FileTreeProps) {
             })}
           </div>
         )}
+
+        {dragOver && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-primary/10">
+            <div className="rounded-lg border border-primary bg-background/95 px-3 py-2 text-xs font-medium text-primary shadow-lg">
+              Drop to upload
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* toolbar */}
       <div className="flex shrink-0 items-center gap-1 border-t border-border bg-muted/30 px-1 py-1">
         <Button
           variant="ghost"
@@ -367,9 +420,33 @@ export function FileTree({ onFileOpened }: FileTreeProps) {
         >
           <FolderPlus className="size-3.5" />
         </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-6"
+          onClick={() => uploadInputRef.current?.click()}
+          title="Upload files"
+          disabled={uploading}
+        >
+          {uploading ? (
+            <RefreshCw className="size-3.5 animate-spin" />
+          ) : (
+            <Upload className="size-3.5" />
+          )}
+        </Button>
+        <input
+          ref={uploadInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? []);
+            void handleDrop(files);
+            e.target.value = "";
+          }}
+        />
       </div>
 
-      {/* context menu */}
       {menu && (
         <div
           className="fixed z-50 w-48 rounded-md border border-border bg-popover p-1 text-xs shadow-xl"
@@ -426,7 +503,7 @@ export function FileTree({ onFileOpened }: FileTreeProps) {
                 onClick={() => {
                   const path = menu.node.path;
                   setMenu(null);
-                  copyPath(path);
+                  void copyPath(path);
                 }}
               />
             </>
@@ -444,7 +521,6 @@ export function FileTree({ onFileOpened }: FileTreeProps) {
         </div>
       )}
 
-      {/* prompt dialog */}
       <Dialog
         open={!!prompt}
         onOpenChange={(open) => !open && setPrompt(null)}
@@ -487,7 +563,6 @@ export function FileTree({ onFileOpened }: FileTreeProps) {
         </DialogContent>
       </Dialog>
 
-      {/* delete confirm */}
       <Dialog
         open={!!deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
