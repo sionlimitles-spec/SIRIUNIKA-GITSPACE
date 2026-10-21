@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useQuery } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
 import {
+  AlertTriangle,
   Code2,
   Eye,
   FileWarning,
   Loader2,
   X,
 } from "lucide-react";
+import type { editor as MonacoApi } from "monaco-editor";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useStore } from "@/lib/store";
@@ -24,6 +26,8 @@ import {
   isBinaryPath,
   isImagePath,
 } from "@/lib/utils";
+import { Breadcrumb } from "@/components/breadcrumb";
+import { WelcomeTab } from "@/components/welcome-tab";
 
 const MonacoEditor = dynamic(
   () => import("@monaco-editor/react").then((m) => m.default),
@@ -38,6 +42,8 @@ const MonacoEditor = dynamic(
   },
 );
 
+const LARGE_FILE_CHARS = 1_000_000;
+
 interface EditorProps {
   client: GithubClient;
 }
@@ -48,9 +54,36 @@ export function Editor({ client }: EditorProps) {
   const setActive = useStore((s) => s.setActive);
   const closeTab = useStore((s) => s.closeTab);
   const drafts = useStore((s) => s.drafts);
+  const openTab = useStore((s) => s.openTab);
+
+  const [pendingJump, setPendingJump] = useState<{
+    path: string;
+    line: number;
+  } | null>(null);
+  const [didInit, setDidInit] = useState(false);
+
+  // one-time: honor ?file=&line= from URL
+  useEffect(() => {
+    if (didInit) return;
+    if (typeof window === "undefined") return;
+    setDidInit(true);
+    const params = new URLSearchParams(window.location.search);
+    const file = params.get("file");
+    const lineParam = params.get("line");
+    if (file) {
+      openTab(file);
+      if (lineParam) {
+        const line = Number(lineParam);
+        if (Number.isFinite(line) && line > 0) {
+          setPendingJump({ path: file, line });
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (tabs.length === 0) {
-    return <EmptyState />;
+    return <WelcomeTab />;
   }
 
   return (
@@ -96,25 +129,19 @@ export function Editor({ client }: EditorProps) {
         })}
       </div>
 
+      {activePath && <Breadcrumb path={activePath} />}
+
       <div className="flex-1 min-h-0">
         {activePath && (
-          <EditorTabContent key={activePath} path={activePath} client={client} />
+          <EditorTabContent
+            key={activePath}
+            path={activePath}
+            client={client}
+            jumpToLine={
+              pendingJump?.path === activePath ? pendingJump.line : undefined
+            }
+          />
         )}
-      </div>
-    </div>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="flex h-full items-center justify-center bg-muted/10">
-      <div className="text-center text-xs text-muted-foreground">
-        <FileWarning className="mx-auto mb-2 size-8 opacity-40" />
-        <p className="font-mono">No file open</p>
-        <p className="mt-1">
-          Pick a file from the tree, or press <kbd>Ctrl</kbd>+
-          <kbd>P</kbd> to quick-open.
-        </p>
       </div>
     </div>
   );
@@ -123,9 +150,11 @@ function EmptyState() {
 function EditorTabContent({
   path,
   client,
+  jumpToLine,
 }: {
   path: string;
   client: GithubClient;
+  jumpToLine?: number;
 }) {
   const original = useStore((s) => s.originals[path]);
   const draft = useStore((s) => s.drafts[path]);
@@ -149,6 +178,7 @@ function EditorTabContent({
   }, [blobQuery.data, sha, path, registerOriginal]);
 
   const content = draft?.content ?? original?.content ?? "";
+  const isLarge = content.length > LARGE_FILE_CHARS;
 
   if (blobQuery.isLoading && !original) {
     return <EditorSkeleton />;
@@ -177,6 +207,8 @@ function EditorTabContent({
       path={path}
       content={content}
       onChange={(next) => updateContent(path, next)}
+      isLarge={isLarge}
+      jumpToLine={jumpToLine}
     />
   );
 }
@@ -216,9 +248,7 @@ function BinaryPlaceholder({ path }: { path: string }) {
       <div>
         <FileWarning className="mx-auto mb-2 size-8 opacity-60" />
         <p className="font-mono">{basename(path)}</p>
-        <p className="mt-1">
-          Binary file — preview not available.
-        </p>
+        <p className="mt-1">Binary file — preview not available.</p>
       </div>
     </div>
   );
@@ -228,47 +258,94 @@ function TextEditor({
   path,
   content,
   onChange,
+  isLarge,
+  jumpToLine,
 }: {
   path: string;
   content: string;
   onChange: (value: string) => void;
+  isLarge: boolean;
+  jumpToLine?: number;
 }) {
   const ext = extname(path);
   const isMarkdown = ext === "md" || ext === "mdx";
   const isHtml = ext === "html" || ext === "htm";
   const supportsPreview = isMarkdown || isHtml;
   const [view, setView] = useState<"code" | "preview">("code");
+  const [largeDismissed, setLargeDismissed] = useState(false);
 
-  useEffect(() => {
-    // switching files should reset preview state
-    setView("code");
-  }, [path]);
-
+  const settings = useStore((s) => s.settings);
   const { resolvedTheme } = useTheme();
   const monacoTheme = resolvedTheme === "light" ? "vs" : "vs-dark";
+  const editorRef = useRef<MonacoApi.IStandaloneCodeEditor | null>(null);
+
+  useEffect(() => {
+    setView("code");
+    setLargeDismissed(false);
+  }, [path]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.updateOptions({
+      fontSize: settings.fontSize,
+      tabSize: settings.tabSize,
+      wordWrap: settings.wordWrap,
+      minimap: { enabled: settings.minimap },
+    });
+  }, [settings]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !jumpToLine) return;
+    editor.revealLineInCenter(jumpToLine);
+    editor.setPosition({ lineNumber: jumpToLine, column: 1 });
+    editor.focus();
+  }, [jumpToLine]);
 
   return (
     <div className="flex h-full flex-col">
-      {supportsPreview && (
-        <div className="flex shrink-0 items-center justify-end gap-1 border-b border-border px-2 py-1">
-          <Button
-            size="sm"
-            variant={view === "code" ? "secondary" : "ghost"}
-            className="h-6 px-2 text-xs"
-            onClick={() => setView("code")}
-          >
-            <Code2 className="size-3" />
-            Code
-          </Button>
-          <Button
-            size="sm"
-            variant={view === "preview" ? "secondary" : "ghost"}
-            className="h-6 px-2 text-xs"
-            onClick={() => setView("preview")}
-          >
-            <Eye className="size-3" />
-            Preview
-          </Button>
+      {(supportsPreview || (isLarge && !largeDismissed)) && (
+        <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
+          {isLarge && !largeDismissed && (
+            <div className="flex flex-1 items-center gap-1.5 text-[11px] text-amber-500">
+              <AlertTriangle className="size-3" />
+              <span className="truncate">
+                Large file ({content.length.toLocaleString()} chars). Editor
+                may be slow.
+              </span>
+              <button
+                type="button"
+                onClick={() => setLargeDismissed(true)}
+                className="ml-auto rounded p-0.5 text-muted-foreground hover:text-foreground"
+                aria-label="Dismiss"
+              >
+                <X className="size-3" />
+              </button>
+            </div>
+          )}
+          {supportsPreview && (
+            <>
+              <Button
+                size="sm"
+                variant={view === "code" ? "secondary" : "ghost"}
+                className="h-6 px-2 text-xs"
+                onClick={() => setView("code")}
+              >
+                <Code2 className="size-3" />
+                Code
+              </Button>
+              <Button
+                size="sm"
+                variant={view === "preview" ? "secondary" : "ghost"}
+                className="h-6 px-2 text-xs"
+                onClick={() => setView("preview")}
+              >
+                <Eye className="size-3" />
+                Preview
+              </Button>
+            </>
+          )}
         </div>
       )}
       <div className="flex-1 min-h-0">
@@ -279,16 +356,27 @@ function TextEditor({
             value={content}
             onChange={(v) => onChange(v ?? "")}
             theme={monacoTheme}
+            onMount={(editor) => {
+              editorRef.current = editor;
+              editor.updateOptions({
+                fontSize: settings.fontSize,
+                tabSize: settings.tabSize,
+                wordWrap: settings.wordWrap,
+                minimap: { enabled: settings.minimap },
+              });
+            }}
             options={{
-              fontSize: 13,
+              fontSize: settings.fontSize,
               fontFamily: "var(--font-jetbrains), ui-monospace, monospace",
-              minimap: { enabled: false },
+              minimap: { enabled: settings.minimap },
               scrollBeyondLastLine: false,
               automaticLayout: true,
-              tabSize: 2,
-              wordWrap: "on",
+              tabSize: settings.tabSize,
+              wordWrap: settings.wordWrap,
               renderLineHighlight: "line",
               smoothScrolling: true,
+              bracketPairColorization: { enabled: true },
+              guides: { indentation: true, bracketPairs: true },
               padding: { top: 8, bottom: 8 },
             }}
           />
@@ -302,7 +390,6 @@ function TextEditor({
   );
 }
 
-/** Minimal safe markdown renderer: escape first, then apply inline replacements. */
 function renderMarkdown(md: string): string {
   const escaped = md
     .replace(/&/g, "&amp;")
@@ -328,7 +415,10 @@ function renderMarkdown(md: string): string {
           .map((line) =>
             line
               .replace(/^[-*]\s+/, "")
-              .replace(/`([^`]+)`/g, '<code class="rounded bg-muted px-1 py-0.5 text-[11px]">$1</code>')
+              .replace(
+                /`([^`]+)`/g,
+                '<code class="rounded bg-muted px-1 py-0.5 text-[11px]">$1</code>',
+              )
               .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
               .replace(/\*([^*]+)\*/g, "<em>$1</em>"),
           )
@@ -337,7 +427,10 @@ function renderMarkdown(md: string): string {
         return `<ul class="ml-4 list-disc space-y-0.5">${items}</ul>`;
       }
       return `<p class="my-2 leading-6">${trimmed
-        .replace(/`([^`]+)`/g, '<code class="rounded bg-muted px-1 py-0.5 text-[11px]">$1</code>')
+        .replace(
+          /`([^`]+)`/g,
+          '<code class="rounded bg-muted px-1 py-0.5 text-[11px]">$1</code>',
+        )
         .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
         .replace(/\*([^*]+)\*/g, "<em>$1</em>")
         .replace(/\n/g, "<br />")}</p>`;
