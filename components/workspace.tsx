@@ -11,7 +11,11 @@ import { useStore } from "@/lib/store";
 import { GithubClient, buildTree, toGithubError } from "@/lib/github";
 import { useSyncPolling } from "@/lib/sync";
 import { TopBar } from "@/components/top-bar";
+import { ActivityBar } from "@/components/activity-bar";
 import { FileTree } from "@/components/file-tree";
+import { ChangesPanel } from "@/components/changes-panel";
+import { SettingsPanel } from "@/components/settings-panel";
+import { HistoryPanel } from "@/components/history-panel";
 import { Editor } from "@/components/editor";
 import { StatusBar } from "@/components/status-bar";
 import { Palette } from "@/components/palette";
@@ -30,6 +34,15 @@ function LoadingScreen({ message }: { message: string }) {
   );
 }
 
+function SidebarContent() {
+  const view = useStore((s) => s.activityView);
+  if (view === "explorer") return <FileTree />;
+  if (view === "changes") return <ChangesPanel />;
+  if (view === "history") return <HistoryPanel />;
+  if (view === "settings") return <SettingsPanel />;
+  return null;
+}
+
 export function Workspace() {
   const router = useRouter();
   const session = useStore((s) => s.session);
@@ -42,10 +55,11 @@ export function Workspace() {
   const toggleTerminal = useStore((s) => s.toggleTerminal);
   const remoteChanged = useStore((s) => s.remoteChanged);
   const setRemoteChanged = useStore((s) => s.setRemoteChanged);
+  const drafts = useStore((s) => s.drafts);
 
   const [ready, setReady] = useState(false);
   const [paletteMode, setPaletteMode] = useState<PaletteMode>(null);
-  const [mobileTreeOpen, setMobileTreeOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const client = useMemo(() => {
     if (!session) return null;
@@ -71,6 +85,17 @@ export function Workspace() {
     }
     hydrateDrafts();
   }, [ready, hydrateDrafts, router, session?.branch]);
+
+  // warn on close if drafts
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (Object.keys(drafts).length === 0) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [drafts]);
 
   const treeQuery = useQuery({
     queryKey: ["tree", session?.owner, session?.repo, session?.branch],
@@ -99,7 +124,6 @@ export function Workspace() {
     });
   }, [treeQuery.error]);
 
-  // real-time branch polling
   useSyncPolling(client, session?.branch, Boolean(client && session));
 
   useEffect(() => {
@@ -120,7 +144,7 @@ export function Workspace() {
       } else if (mod && e.key.toLowerCase() === "s" && !e.shiftKey) {
         e.preventDefault();
         toast.success("Drafts saved locally", {
-          description: "Use Save / Push to commit to GitHub.",
+          description: "Use Save/Push to commit to GitHub.",
         });
       }
     };
@@ -136,7 +160,7 @@ export function Workspace() {
     <div className="h-dvh flex flex-col bg-background text-foreground overflow-hidden">
       <TopBar
         client={client}
-        onOpenTree={() => setMobileTreeOpen(true)}
+        onOpenSidebar={() => setMobileSidebarOpen(true)}
         onOpenPalette={(mode) => setPaletteMode(mode)}
       />
 
@@ -162,77 +186,90 @@ export function Workspace() {
         </div>
       )}
 
-      <div className="flex-1 min-h-0">
-        {refreshing ? (
-          <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
-            <RefreshCw className="size-4 animate-spin mr-2" />
-            Loading repository tree…
-          </div>
-        ) : (
-          <>
-            <PanelGroup
-              direction="horizontal"
-              className="hidden md:flex h-full"
-              autoSaveId="repodeck:panels-h"
-            >
-              <Panel defaultSize={22} minSize={14} maxSize={40}>
-                <FileTree />
-              </Panel>
-              <PanelResizeHandle className="w-px bg-border hover:bg-primary/60 transition-colors" />
-              <Panel defaultSize={78}>
-                <PanelGroup direction="vertical" autoSaveId="repodeck:panels-v">
-                  <Panel defaultSize={terminalOpen ? 70 : 100} minSize={30}>
-                    <Editor client={client} />
-                  </Panel>
-                  {terminalOpen && (
-                    <>
-                      <PanelResizeHandle className="h-px bg-border hover:bg-primary/60 transition-colors" />
-                      <Panel defaultSize={30} minSize={12}>
-                        <Terminal client={client} />
-                      </Panel>
-                    </>
-                  )}
-                </PanelGroup>
-              </Panel>
-            </PanelGroup>
+      <div className="flex flex-1 min-h-0">
+        {/* activity bar (desktop only) */}
+        <div className="hidden md:flex">
+          <ActivityBar />
+        </div>
 
-            <div className="md:hidden h-full flex flex-col">
-              <div className="flex-1 min-h-0">
-                <Editor client={client} />
-              </div>
-              {terminalOpen && (
-                <div className="h-64 shrink-0">
-                  <Terminal client={client} />
-                </div>
-              )}
+        <div className="flex-1 min-w-0">
+          {refreshing ? (
+            <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+              <RefreshCw className="size-4 animate-spin mr-2" />
+              Loading repository tree…
             </div>
-          </>
-        )}
+          ) : (
+            <>
+              <PanelGroup
+                direction="horizontal"
+                className="hidden md:flex h-full"
+                autoSaveId="repodeck:panels-h"
+              >
+                <Panel defaultSize={22} minSize={14} maxSize={40}>
+                  <SidebarContent />
+                </Panel>
+                <PanelResizeHandle className="w-px bg-border hover:bg-primary/60 transition-colors" />
+                <Panel defaultSize={78}>
+                  <PanelGroup
+                    direction="vertical"
+                    autoSaveId="repodeck:panels-v"
+                  >
+                    <Panel defaultSize={terminalOpen ? 70 : 100} minSize={30}>
+                      <Editor client={client} />
+                    </Panel>
+                    {terminalOpen && (
+                      <>
+                        <PanelResizeHandle className="h-px bg-border hover:bg-primary/60 transition-colors" />
+                        <Panel defaultSize={30} minSize={12}>
+                          <Terminal client={client} />
+                        </Panel>
+                      </>
+                    )}
+                  </PanelGroup>
+                </Panel>
+              </PanelGroup>
+
+              <div className="md:hidden h-full flex flex-col">
+                <div className="flex-1 min-h-0">
+                  <Editor client={client} />
+                </div>
+                {terminalOpen && (
+                  <div className="h-64 shrink-0">
+                    <Terminal client={client} />
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       <StatusBar />
 
-      {mobileTreeOpen && (
+      {mobileSidebarOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <div
             className="absolute inset-0 bg-black/60"
-            onClick={() => setMobileTreeOpen(false)}
+            onClick={() => setMobileSidebarOpen(false)}
           />
-          <div className="absolute left-0 top-0 bottom-0 w-[82vw] max-w-sm border-r border-border bg-background shadow-2xl flex flex-col">
+          <div className="absolute left-0 top-0 bottom-0 flex w-[82vw] max-w-sm flex-col border-r border-border bg-background shadow-2xl">
             <div className="flex items-center justify-between border-b border-border px-3 py-2">
-              <span className="text-xs font-semibold">Files</span>
+              <span className="text-xs font-semibold">Sidebar</span>
               <Button
                 variant="ghost"
                 size="icon"
                 className="size-7"
-                onClick={() => setMobileTreeOpen(false)}
-                aria-label="Close file tree"
+                onClick={() => setMobileSidebarOpen(false)}
+                aria-label="Close sidebar"
               >
                 <Menu className="size-4" />
               </Button>
             </div>
-            <div className="flex-1 min-h-0">
-              <FileTree onFileOpened={() => setMobileTreeOpen(false)} />
+            <div className="flex flex-1 min-h-0">
+              <ActivityBar />
+              <div className="flex-1 min-w-0">
+                <SidebarContent />
+              </div>
             </div>
           </div>
         </div>
@@ -241,4 +278,4 @@ export function Workspace() {
       <Palette mode={paletteMode} onClose={() => setPaletteMode(null)} />
     </div>
   );
-}
+    }
