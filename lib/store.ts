@@ -22,6 +22,11 @@ import {
 } from "@/lib/utils";
 
 export type FileStatus = "added" | "modified" | "deleted";
+export type ActivityView =
+  | "explorer"
+  | "changes"
+  | "history"
+  | "settings";
 
 export interface FileDraft {
   path: string;
@@ -43,6 +48,34 @@ export interface PushResult {
   blobs: Record<string, string>;
 }
 
+export interface EditorSettings {
+  fontSize: number;
+  tabSize: number;
+  wordWrap: "on" | "off";
+  minimap: boolean;
+}
+
+const DEFAULT_SETTINGS: EditorSettings = {
+  fontSize: 13,
+  tabSize: 2,
+  wordWrap: "on",
+  minimap: false,
+};
+
+const SETTINGS_KEY = "repodeck:editor-settings";
+const RECENT_FILES_KEY = "repodeck:recent-files";
+
+function loadSettings(): EditorSettings {
+  const stored = readJson<Partial<EditorSettings>>("local", SETTINGS_KEY);
+  return { ...DEFAULT_SETTINGS, ...(stored ?? {}) };
+}
+
+function loadRecentFiles(): string[] {
+  const stored = readJson<string[]>("local", RECENT_FILES_KEY);
+  if (!Array.isArray(stored)) return [];
+  return stored.filter((p) => typeof p === "string").slice(0, 20);
+}
+
 interface Store {
   session: RepoSession | null;
   setSession: (session: RepoSession | null) => void;
@@ -56,11 +89,17 @@ interface Store {
   expanded: Record<string, boolean>;
   toggleDir: (path: string) => void;
   expandTo: (path: string) => void;
+
+  activityView: ActivityView;
+  setActivityView: (view: ActivityView) => void;
+
   terminalOpen: boolean;
   toggleTerminal: () => void;
+  setTerminalOpen: (open: boolean) => void;
 
   tabs: string[];
   activePath: string | null;
+  recentFiles: string[];
   openTab: (path: string) => void;
   closeTab: (path: string) => void;
   setActive: (path: string) => void;
@@ -75,6 +114,7 @@ interface Store {
   deleteFile: (path: string) => void;
   duplicateFile: (path: string) => boolean;
   revertFile: (path: string) => void;
+  discardAll: () => void;
 
   hydrated: boolean;
   hydratedFor: string | null;
@@ -88,6 +128,9 @@ interface Store {
   setSyncStatus: (s: SyncStatus) => void;
   rateLimitRemaining: number | undefined;
   setRateLimitRemaining: (n: number | undefined) => void;
+
+  settings: EditorSettings;
+  updateSettings: (patch: Partial<EditorSettings>) => void;
 
   applyPush: (result: PushResult) => void;
   reset: () => void;
@@ -121,9 +164,11 @@ const initialState = {
   treeTruncated: false,
   treeLoaded: false,
   expanded: {} as Record<string, boolean>,
+  activityView: "explorer" as ActivityView,
   terminalOpen: false,
   tabs: [] as string[],
   activePath: null as string | null,
+  recentFiles: [] as string[],
   originals: {} as Record<string, OriginalFile>,
   drafts: {} as Record<string, FileDraft>,
   hydrated: false,
@@ -132,6 +177,7 @@ const initialState = {
   remoteChanged: false,
   syncStatus: "synced" as SyncStatus,
   rateLimitRemaining: undefined as number | undefined,
+  settings: DEFAULT_SETTINGS,
 };
 
 export const useStore = create<Store>()((set, get) => ({
@@ -159,7 +205,11 @@ export const useStore = create<Store>()((set, get) => ({
     const fromSession = readJson<RepoSession>("session", STORAGE_KEYS.session);
     const fromLocal = readJson<RepoSession>("local", STORAGE_KEYS.remembered);
     const session = fromSession ?? fromLocal;
-    if (session) set({ session });
+    set({
+      session: session ?? null,
+      settings: loadSettings(),
+      recentFiles: loadRecentFiles(),
+    });
   },
 
   setTree: (tree, truncated) => {
@@ -183,14 +233,22 @@ export const useStore = create<Store>()((set, get) => ({
       return { expanded };
     }),
 
+  setActivityView: (view) => set({ activityView: view }),
+
   toggleTerminal: () => set((s) => ({ terminalOpen: !s.terminalOpen })),
+  setTerminalOpen: (open) => set({ terminalOpen: open }),
 
   openTab: (path) => {
     const s = get();
     const tabs = s.tabs.includes(path) ? s.tabs : [...s.tabs, path];
     const expanded = { ...s.expanded };
     for (const ancestor of getAncestorPaths(path)) expanded[ancestor] = true;
-    set({ tabs, activePath: path, expanded });
+    const recentFiles = [
+      path,
+      ...s.recentFiles.filter((p) => p !== path),
+    ].slice(0, 20);
+    writeJson("local", RECENT_FILES_KEY, recentFiles);
+    set({ tabs, activePath: path, expanded, recentFiles });
   },
 
   closeTab: (path) => {
@@ -204,7 +262,15 @@ export const useStore = create<Store>()((set, get) => ({
     set({ tabs, activePath });
   },
 
-  setActive: (path) => set({ activePath: path }),
+  setActive: (path) => {
+    const s = get();
+    const recentFiles = [
+      path,
+      ...s.recentFiles.filter((p) => p !== path),
+    ].slice(0, 20);
+    writeJson("local", RECENT_FILES_KEY, recentFiles);
+    set({ activePath: path, recentFiles });
+  },
 
   registerOriginal: (path, content, sha) => {
     const s = get();
@@ -236,8 +302,7 @@ export const useStore = create<Store>()((set, get) => ({
       return;
     }
 
-    const status: FileStatus =
-      originalContent === null ? "added" : "modified";
+    const status: FileStatus = originalContent === null ? "added" : "modified";
 
     set({
       drafts: {
@@ -367,7 +432,8 @@ export const useStore = create<Store>()((set, get) => ({
         : t,
     );
     const activePath =
-      s.activePath && (s.activePath === cleanOld || s.activePath.startsWith(`${cleanOld}/`))
+      s.activePath &&
+      (s.activePath === cleanOld || s.activePath.startsWith(`${cleanOld}/`))
         ? cleanNew + s.activePath.slice(cleanOld.length)
         : s.activePath;
 
@@ -468,6 +534,21 @@ export const useStore = create<Store>()((set, get) => ({
     set({ drafts });
   },
 
+  discardAll: () => {
+    const s = get();
+    set({
+      drafts: {},
+      tree: s.treeLoaded
+        ? s.tree
+        : s.tree,
+      tabs: s.tabs.filter((t) => !s.drafts[t] || s.drafts[t].status !== "added"),
+      activePath: s.activePath,
+    });
+    // Rebuild tree without added files
+    const cleanTree = removeAddedNodes(s.tree, s.drafts);
+    set({ tree: cleanTree });
+  },
+
   hydrateDrafts: () => {
     const s = get();
     if (!s.session) return;
@@ -501,6 +582,12 @@ export const useStore = create<Store>()((set, get) => ({
   setRemoteChanged: (v) => set({ remoteChanged: v }),
   setSyncStatus: (s) => set({ syncStatus: s }),
   setRateLimitRemaining: (n) => set({ rateLimitRemaining: n }),
+
+  updateSettings: (patch) => {
+    const next = { ...get().settings, ...patch };
+    writeJson("local", SETTINGS_KEY, next);
+    set({ settings: next });
+  },
 
   applyPush: (result) => {
     const s = get();
@@ -542,6 +629,19 @@ export const useStore = create<Store>()((set, get) => ({
   reset: () => set({ ...initialState }),
 }));
 
+function removeAddedNodes(
+  tree: TreeNode[],
+  drafts: Record<string, FileDraft>,
+): TreeNode[] {
+  let next = tree;
+  for (const draft of Object.values(drafts)) {
+    if (draft.status === "added") {
+      next = removeNode(next, draft.path);
+    }
+  }
+  return next;
+}
+
 if (typeof window !== "undefined") {
   let timer: number | undefined;
   useStore.subscribe((state, prev) => {
@@ -565,4 +665,4 @@ if (typeof window !== "undefined") {
 
 export function changedCount(drafts: Record<string, FileDraft>): number {
   return Object.keys(drafts).length;
-        }
+}
