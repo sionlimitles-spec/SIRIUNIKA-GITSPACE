@@ -5,10 +5,10 @@ import type { GithubClient } from "@/lib/github";
 import { useStore } from "@/lib/store";
 
 const INTERVAL_KEY = "repodeck:poll-interval";
-const DEFAULT_INTERVAL = 12_000; // dinaikkan dari 8s → hemat 33%
+const DEFAULT_INTERVAL = 12_000;
 const MIN_INTERVAL = 8_000;
 const MAX_INTERVAL = 60_000;
-const MIN_REMAINING = 100; // pause polling kalau sisa < 100
+const MIN_REMAINING = 100;
 
 export function getPollInterval(): number {
   if (typeof window === "undefined") return DEFAULT_INTERVAL;
@@ -26,6 +26,10 @@ export function setPollInterval(ms: number): void {
   );
 }
 
+/**
+ * Polls the branch ref with an ETag so that 304 responses don't consume rate
+ * limit. Pauses while the tab is hidden or when rate limit is low.
+ */
 export function useSyncPolling(
   client: GithubClient | null,
   branch: string | undefined,
@@ -50,7 +54,7 @@ export function useSyncPolling(
 
       const store = useStore.getState();
 
-      // Skip kalau rate limit menipis — yang penting UI nggak error
+      // Pause polling when the token is about to run out.
       if (
         store.rateLimitRemaining !== undefined &&
         store.rateLimitRemaining < MIN_REMAINING
