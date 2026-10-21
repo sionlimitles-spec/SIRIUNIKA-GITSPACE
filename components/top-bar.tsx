@@ -7,11 +7,13 @@ import {
   Copy,
   Download,
   Layers,
+  Link2,
   Menu,
   Moon,
   Save,
   Sun,
   Terminal as TerminalIcon,
+  Upload,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
@@ -28,16 +30,22 @@ import { useStore } from "@/lib/store";
 import type { GithubClient } from "@/lib/github";
 import { CommitDialog } from "@/components/commit-dialog";
 import { ExportDialog } from "@/components/export-dialog";
+import { UploadDialog } from "@/components/upload-dialog";
+import { ShareDialog } from "@/components/share-dialog";
 
 type PaletteMode = "quick-open" | "commands" | "search-all";
 
 interface TopBarProps {
   client: GithubClient;
-  onOpenTree: () => void;
+  onOpenSidebar: () => void;
   onOpenPalette: (mode: PaletteMode) => void;
 }
 
-export function TopBar({ client, onOpenTree, onOpenPalette }: TopBarProps) {
+export function TopBar({
+  client,
+  onOpenSidebar,
+  onOpenPalette,
+}: TopBarProps) {
   const session = useStore((s) => s.session);
   const setSession = useStore((s) => s.setSession);
   const drafts = useStore((s) => s.drafts);
@@ -50,6 +58,8 @@ export function TopBar({ client, onOpenTree, onOpenPalette }: TopBarProps) {
   const [branches, setBranches] = useState<string[]>([]);
   const [commitOpen, setCommitOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const changeCount = Object.keys(drafts).length;
 
@@ -95,8 +105,8 @@ export function TopBar({ client, onOpenTree, onOpenPalette }: TopBarProps) {
         variant="ghost"
         size="icon"
         className="md:hidden size-8"
-        onClick={onOpenTree}
-        aria-label="Open files"
+        onClick={onOpenSidebar}
+        aria-label="Open sidebar"
       >
         <Menu className="size-4" />
       </Button>
@@ -159,11 +169,22 @@ export function TopBar({ client, onOpenTree, onOpenPalette }: TopBarProps) {
           variant="ghost"
           size="sm"
           className="h-7 gap-1 text-xs"
+          onClick={() => setUploadOpen(true)}
+          title="Upload files"
+        >
+          <Upload className="size-3.5" />
+          <span className="hidden lg:inline">Upload</span>
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1 text-xs"
           onClick={() => setExportOpen(true)}
-          title="Copy all files"
+          title="Copy or download all files"
         >
           <Copy className="size-3.5" />
-          <span className="hidden md:inline">Copy</span>
+          <span className="hidden lg:inline">Copy</span>
         </Button>
 
         <Button
@@ -174,7 +195,17 @@ export function TopBar({ client, onOpenTree, onOpenPalette }: TopBarProps) {
           title="Download all files"
         >
           <Download className="size-3.5" />
-          <span className="hidden md:inline">Download</span>
+          <span className="hidden xl:inline">Download</span>
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          onClick={() => setShareOpen(true)}
+          title="Share a deep link"
+        >
+          <Link2 className="size-3.5" />
         </Button>
 
         <Button
@@ -233,6 +264,8 @@ export function TopBar({ client, onOpenTree, onOpenPalette }: TopBarProps) {
         open={exportOpen}
         onOpenChange={setExportOpen}
       />
+      <UploadDialog open={uploadOpen} onOpenChange={setUploadOpen} />
+      <ShareDialog open={shareOpen} onOpenChange={setShareOpen} />
     </div>
   );
-  }
+}
