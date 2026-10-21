@@ -253,7 +253,8 @@ const BUILTINS: Record<string, { help: string; run: CmdFn }> = {
       const store = useStore.getState();
       const node = findNode(store.tree, target);
       if (!node) return println(c("red", `cat: ${args[0]}: no such file`));
-      if (node.type === "dir") return println(c("red", `cat: ${args[0]}: is a directory`));
+      if (node.type === "dir")
+        return println(c("red", `cat: ${args[0]}: is a directory`));
       let content =
         store.drafts[target]?.content ?? store.originals[target]?.content;
       if (content === undefined && node.sha) {
@@ -322,11 +323,10 @@ const BUILTINS: Record<string, { help: string; run: CmdFn }> = {
       const store = useStore.getState();
       const content =
         store.drafts[from]?.content ?? store.originals[from]?.content;
-      if (content === undefined) return println(c("red", `cp: ${args[0]}: not loaded`));
+      if (content === undefined)
+        return println(c("red", `cp: ${args[0]}: not loaded`));
       const ok = store.addFile(to, content);
-      println(
-        ok ? c("green", `Copied to ${to}`) : c("red", `cp: failed`),
-      );
+      println(ok ? c("green", `Copied to ${to}`) : c("red", `cp: failed`));
     },
   },
   echo: {
@@ -366,7 +366,6 @@ const BUILTINS: Record<string, { help: string; run: CmdFn }> = {
   history: {
     help: "Show command history",
     run: (_a, { println }) => {
-      // filled by terminal per-session
       println(c("dim", "(history is maintained per tab)"));
     },
   },
@@ -465,11 +464,17 @@ async function runGit(args: string[], ctx: Ctx): Promise<void> {
       }
       println();
       println(
-        c("dim", `Type 'git show <sha>' to view details, or visit the commit URL.`),
+        c(
+          "dim",
+          `Type 'git show <sha>' to view details, or visit the commit URL.`,
+        ),
       );
     } catch (err) {
       println(
-        c("red", `git log failed: ${err instanceof Error ? err.message : "unknown"}`),
+        c(
+          "red",
+          `git log failed: ${err instanceof Error ? err.message : "unknown"}`,
+        ),
       );
     }
     return;
@@ -504,7 +509,10 @@ async function runGit(args: string[], ctx: Ctx): Promise<void> {
       }
     } catch (err) {
       println(
-        c("red", `git show failed: ${err instanceof Error ? err.message : "unknown"}`),
+        c(
+          "red",
+          `git show failed: ${err instanceof Error ? err.message : "unknown"}`,
+        ),
       );
     }
     return;
@@ -519,7 +527,10 @@ async function runGit(args: string[], ctx: Ctx): Promise<void> {
       }
     } catch (err) {
       println(
-        c("red", `git branch failed: ${err instanceof Error ? err.message : "unknown"}`),
+        c(
+          "red",
+          `git branch failed: ${err instanceof Error ? err.message : "unknown"}`,
+        ),
       );
     }
     return;
@@ -542,7 +553,9 @@ async function runGit(args: string[], ctx: Ctx): Promise<void> {
     if (!target) return println(c("red", "git checkout <branch>"));
     if (!store.session) return;
     if (Object.keys(store.drafts).length > 0) {
-      return println(c("red", "error: uncommitted changes — Save / Push first"));
+      return println(
+        c("red", "error: uncommitted changes — Save / Push first"),
+      );
     }
     useStore.getState().setSession({ ...store.session, branch: target });
     useStore.setState({
@@ -644,15 +657,24 @@ async function runGh(args: string[], ctx: Ctx): Promise<void> {
       for (const pr of prs) {
         const badge = pr.draft ? c("dim", " draft") : "";
         println(
-          `${c("yellow", `#${pr.number}`)} ${c(pr.state === "open" ? "green" : "red", pr.state.padEnd(6))} ${pr.title}${badge}`,
+          `${c("yellow", `#${pr.number}`)} ${c(
+            pr.state === "open" ? "green" : "red",
+            pr.state.padEnd(6),
+          )} ${pr.title}${badge}`,
         );
         println(
-          `  ${c("dim", `by ${pr.user} · ${pr.head} → ${pr.base} · ${pr.htmlUrl}`)}`,
+          `  ${c(
+            "dim",
+            `by ${pr.user} · ${pr.head} → ${pr.base} · ${pr.htmlUrl}`,
+          )}`,
         );
       }
     } catch (err) {
       println(
-        c("red", `gh pr list failed: ${err instanceof Error ? err.message : "unknown"}`),
+        c(
+          "red",
+          `gh pr list failed: ${err instanceof Error ? err.message : "unknown"}`,
+        ),
       );
     }
     return;
@@ -670,15 +692,26 @@ async function runGh(args: string[], ctx: Ctx): Promise<void> {
       if (issues.length === 0) return println(c("dim", "(no issues)"));
       for (const i of issues) {
         println(
-          `${c("yellow", `#${i.number}`)} ${c(i.state === "open" ? "green" : "red", i.state.padEnd(6))} ${i.title}`,
+          `${c("yellow", `#${i.number}`)} ${c(
+            i.state === "open" ? "green" : "red",
+            i.state.padEnd(6),
+          )} ${i.title}`,
         );
         println(
-          `  ${c("dim", `by ${i.user} · ${i.htmlUrl}${i.labels.length ? ` · [${i.labels.join(", ")}]` : ""}`)}`,
+          `  ${c(
+            "dim",
+            `by ${i.user} · ${i.htmlUrl}${
+              i.labels.length ? ` · [${i.labels.join(", ")}]` : ""
+            }`,
+          )}`,
         );
       }
     } catch (err) {
       println(
-        c("red", `gh issue list failed: ${err instanceof Error ? err.message : "unknown"}`),
+        c(
+          "red",
+          `gh issue list failed: ${err instanceof Error ? err.message : "unknown"}`,
+        ),
       );
     }
     return;
@@ -694,13 +727,18 @@ async function runGh(args: string[], ctx: Ctx): Promise<void> {
         if (r.draft) tags.push("draft");
         if (r.prerelease) tags.push("pre");
         println(
-          `${c("yellow", r.tag)}${tags.length ? ` ${c("dim", `[${tags.join(",")}]`)}` : ""} ${r.name}`,
+          `${c("yellow", r.tag)}${
+            tags.length ? ` ${c("dim", `[${tags.join(",")}]`)}` : ""
+          } ${r.name}`,
         );
         println(`  ${c("dim", `${r.author} · ${r.htmlUrl}`)}`);
       }
     } catch (err) {
       println(
-        c("red", `gh release list failed: ${err instanceof Error ? err.message : "unknown"}`),
+        c(
+          "red",
+          `gh release list failed: ${err instanceof Error ? err.message : "unknown"}`,
+        ),
       );
     }
     return;
@@ -711,11 +749,21 @@ async function runGh(args: string[], ctx: Ctx): Promise<void> {
       const meta = await client.getRepo();
       println(c("bold", meta.fullName));
       if (meta.description) println(meta.description);
-      println(c("dim", `stars: ${meta.stars} · default: ${meta.defaultBranch} · ${meta.private ? "private" : "public"}`));
+      println(
+        c(
+          "dim",
+          `stars: ${meta.stars} · default: ${meta.defaultBranch} · ${
+            meta.private ? "private" : "public"
+          }`,
+        ),
+      );
       println(c("dim", meta.htmlUrl));
     } catch (err) {
       println(
-        c("red", `gh repo view failed: ${err instanceof Error ? err.message : "unknown"}`),
+        c(
+          "red",
+          `gh repo view failed: ${err instanceof Error ? err.message : "unknown"}`,
+        ),
       );
     }
     return;
@@ -728,7 +776,10 @@ async function runGh(args: string[], ctx: Ctx): Promise<void> {
       if (u.name) println(`  Name: ${u.name}`);
     } catch (err) {
       println(
-        c("red", `gh whoami failed: ${err instanceof Error ? err.message : "unknown"}`),
+        c(
+          "red",
+          `gh whoami failed: ${err instanceof Error ? err.message : "unknown"}`,
+        ),
       );
     }
     return;
@@ -794,7 +845,6 @@ export function Terminal({ client }: { client: GithubClient }) {
 
   return (
     <div className="flex h-full flex-col bg-[#0d1117]">
-      {/* tab bar */}
       <div className="flex h-8 shrink-0 items-stretch overflow-x-auto border-b border-border bg-muted/20 text-xs scrollbar-thin">
         <div className="flex items-center gap-1 px-2 text-muted-foreground">
           <span className="size-1.5 rounded-full bg-emerald-500" />
@@ -839,7 +889,6 @@ export function Terminal({ client }: { client: GithubClient }) {
         </button>
       </div>
 
-      {/* terminal panels */}
       <div className="relative flex-1 min-h-0">
         {tabs.map((tab) => (
           <TerminalPanel
@@ -873,8 +922,6 @@ function TerminalPanel({
   onClose: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const visibleRef = useRef(visible);
-  visibleRef.current = visible;
 
   useEffect(() => {
     let cancelled = false;
@@ -885,7 +932,7 @@ function TerminalPanel({
         import("@xterm/xterm"),
         import("@xterm/addon-fit"),
       ]);
-      // @ts-expect-error side-effect CSS import
+      // Side-effect CSS import — handled by the Next.js bundler.
       await import("@xterm/xterm/css/xterm.css");
 
       if (cancelled || !containerRef.current) return;
@@ -948,7 +995,10 @@ function TerminalPanel({
       runtimeRef.current.set(id, rt);
 
       const prompt = () =>
-        `${c("green", "repodeck")}${c("dim", "·")}${c("cyan", `/${rt.cwd || ""}`)}${c("dim", "$")} `;
+        `${c("green", "repodeck")}${c("dim", "·")}${c(
+          "cyan",
+          `/${rt.cwd || ""}`,
+        )}${c("dim", "$")} `;
 
       const writePrompt = () => term.write("\r\n" + prompt());
       const print = (t: string) => term.write(t);
@@ -963,23 +1013,6 @@ function TerminalPanel({
         term.write(prompt());
       };
 
-      const ctx: Ctx = {
-        get cwd() {
-          return rt.cwd;
-        },
-        setCwd: (n) => {
-          rt.cwd = n;
-        },
-        print,
-        println,
-        clear,
-        client,
-        commitMessageRef: { current: "" },
-        branch: useStore.getState().session?.branch ?? "main",
-        closeTerminal: onClose,
-      } as unknown as Ctx;
-      // Ctx uses cwd as value; we need live access. Recreate per-command below.
-
       const makeCtx = (): Ctx => ({
         cwd: rt.cwd,
         setCwd: (n) => {
@@ -993,7 +1026,6 @@ function TerminalPanel({
         branch: useStore.getState().session?.branch ?? "main",
         closeTerminal: onClose,
       });
-      void ctx;
 
       const run = async (line: string) => {
         const trimmed = line.trim();
@@ -1019,7 +1051,6 @@ function TerminalPanel({
           return;
         }
 
-        // Binary/packaged commands → help + download
         const NOT_SUPPORTED = [
           "npm",
           "node",
@@ -1042,7 +1073,10 @@ function TerminalPanel({
         ];
         if (NOT_SUPPORTED.includes(name)) {
           println(
-            c("yellow", `${name} is not available in this terminal (browser environment).`),
+            c(
+              "yellow",
+              `${name} is not available in this terminal (browser environment).`,
+            ),
           );
           println(
             c("dim", "A shell script equivalent has been prepared for you."),
@@ -1102,7 +1136,7 @@ function TerminalPanel({
         const baseName = basename(prefix);
         const targetDir = resolvePath(rt.cwd, parent);
         const dir = getDirNode(tree, targetDir);
-        const children = dir?.children ?? [];
+        const children: TreeNode[] = dir?.children ?? [];
         const matches = children
           .filter((n) => n.name.startsWith(baseName))
           .map((n) => (n.type === "dir" ? `${n.name}/` : n.name));
@@ -1183,7 +1217,6 @@ function TerminalPanel({
         }
       });
 
-      // banner
       println(c("bold", "RepoDeck terminal v2"));
       println(
         c(
@@ -1211,7 +1244,6 @@ function TerminalPanel({
     if (!visible) return;
     const rt = runtimeRef.current.get(id);
     if (!rt) return;
-    // schedule fit after paint
     requestAnimationFrame(() => {
       try {
         rt.fit.fit();
