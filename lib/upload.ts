@@ -8,10 +8,6 @@ export interface IngestResult {
   skipped: Array<{ path: string; reason: string }>;
 }
 
-interface FileWithRelativePath extends File {
-  webkitRelativePath?: string;
-}
-
 export async function ingestFiles(
   files: File[],
   addFile: (path: string, content: string) => boolean,
@@ -19,8 +15,12 @@ export async function ingestFiles(
   const result: IngestResult = { added: [], skipped: [] };
 
   for (const file of files) {
+    // `webkitRelativePath` is non-standard but widely supported for folder
+    // uploads. Cast to intersection — do NOT extend File (its version is
+    // required, ours is optional, so extending would clash).
     const relPath =
-      (file as FileWithRelativePath).webkitRelativePath || file.name;
+      (file as File & { webkitRelativePath?: string }).webkitRelativePath ||
+      file.name;
     const cleanPath = normalizePath(relPath);
     if (!cleanPath) continue;
 
