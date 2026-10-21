@@ -71,11 +71,16 @@ export function Workspace() {
     );
   }, [session, setRateLimitRemaining]);
 
+  // 1) Hydrate session, wait a tick for the store write to land before
+  //    trusting `session`. This eliminates the occasional redirect-to-home
+  //    race under React StrictMode + Turbopack.
   useEffect(() => {
     hydrateSession();
-    setReady(true);
+    const t = window.setTimeout(() => setReady(true), 60);
+    return () => window.clearTimeout(t);
   }, [hydrateSession]);
 
+  // 2) Only redirect once we're ready AND the store is actually empty.
   useEffect(() => {
     if (!ready) return;
     const current = useStore.getState().session;
@@ -86,7 +91,7 @@ export function Workspace() {
     hydrateDrafts();
   }, [ready, hydrateDrafts, router, session?.branch]);
 
-  // warn on close if drafts
+  // Warn on tab close when there are unsaved drafts.
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
       if (Object.keys(drafts).length === 0) return;
@@ -152,7 +157,9 @@ export function Workspace() {
     return () => window.removeEventListener("keydown", handler);
   }, [toggleTerminal]);
 
-  if (!session || !client) return <LoadingScreen message="Restoring session…" />;
+  if (!ready || !session || !client) {
+    return <LoadingScreen message="Restoring session…" />;
+  }
 
   const refreshing = treeQuery.isFetching && !treeQuery.data;
 
@@ -187,7 +194,6 @@ export function Workspace() {
       )}
 
       <div className="flex flex-1 min-h-0">
-        {/* activity bar (desktop only) */}
         <div className="hidden md:flex">
           <ActivityBar />
         </div>
@@ -278,4 +284,4 @@ export function Workspace() {
       <Palette mode={paletteMode} onClose={() => setPaletteMode(null)} />
     </div>
   );
-    }
+}
