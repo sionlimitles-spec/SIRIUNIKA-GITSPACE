@@ -6,6 +6,7 @@ export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
 }
 
+/* ---------- Base64 ⇄ UTF-8 ---------- */
 export function base64ToUtf8(b64: string): string {
   const cleaned = b64.replace(/\s/g, "");
   if (!cleaned) return "";
@@ -27,6 +28,7 @@ export function utf8ToBase64(text: string): string {
   return btoa(binary);
 }
 
+/* ---------- Storage ---------- */
 export const STORAGE_KEYS = {
   session: "repodeck:session",
   remembered: "repodeck:session:remembered",
@@ -80,6 +82,7 @@ export function writeJson(
   }
 }
 
+/* ---------- Path helpers ---------- */
 export function basename(path: string): string {
   const i = path.lastIndexOf("/");
   return i === -1 ? path : path.slice(i + 1);
@@ -119,6 +122,7 @@ export function parseRepo(input: string): { owner: string; repo: string } | null
   return { owner: match[1], repo: match[2] };
 }
 
+/* ---------- Language / MIME ---------- */
 const LANG_MAP: Record<string, string> = {
   js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
   ts: "typescript", tsx: "typescript", mts: "typescript", cts: "typescript",
@@ -174,6 +178,7 @@ export function getMimeType(path: string): string {
   return MIME_MAP[extname(path)] ?? "application/octet-stream";
 }
 
+/* ---------- Misc formatting ---------- */
 export function formatRelativeTime(timestamp: number): string {
   const diff = timestamp - Date.now();
   const abs = Math.abs(diff);
@@ -212,28 +217,123 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
-export async function copyToClipboard(text: string): Promise<boolean> {
+/* ---------- Clipboard (iframe-safe) ---------- */
+export function isInIframe(): boolean {
+  if (typeof window === "undefined") return false;
   try {
-    await navigator.clipboard.writeText(text);
-    return true;
+    return window.self !== window.top;
   } catch {
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.setAttribute("readonly", "");
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand("copy");
-      ta.remove();
-      return ok;
-    } catch {
-      return false;
-    }
+    return true;
   }
 }
 
+let manualCopyOverlay: HTMLElement | null = null;
+
+function openManualCopyModal(text: string): void {
+  if (typeof document === "undefined") return;
+  if (manualCopyOverlay) {
+    manualCopyOverlay.remove();
+    manualCopyOverlay = null;
+  }
+
+  const overlay = document.createElement("div");
+  overlay.style.cssText =
+    "position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:16px;";
+
+  const card = document.createElement("div");
+  card.style.cssText =
+    "background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:16px;max-width:720px;width:100%;max-height:82vh;display:flex;flex-direction:column;gap:8px;color:#e6edf3;font-family:ui-sans-serif,system-ui,sans-serif;box-shadow:0 24px 48px -12px rgba(0,0,0,.6);";
+
+  const title = document.createElement("div");
+  title.textContent = "Copy manually";
+  title.style.cssText = "font-size:13px;font-weight:600;";
+
+  const hint = document.createElement("div");
+  hint.textContent =
+    "Your browser blocked the clipboard in this context. Select all, copy (Ctrl/Cmd+C), then close this dialog.";
+  hint.style.cssText = "font-size:11px;color:#8b949e;line-height:1.5;";
+
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.readOnly = true;
+  ta.style.cssText =
+    "flex:1;min-height:220px;width:100%;background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:8px;font-family:ui-monospace,SFMono-Regular,monospace;font-size:11px;resize:vertical;outline:none;";
+
+  const btnRow = document.createElement("div");
+  btnRow.style.cssText = "display:flex;justify-content:flex-end;gap:8px;";
+
+  const close = document.createElement("button");
+  close.textContent = "Close";
+  close.style.cssText =
+    "background:#10b981;color:#052e1c;border:0;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;";
+  close.onclick = () => {
+    overlay.remove();
+    manualCopyOverlay = null;
+  };
+
+  btnRow.append(close);
+  card.append(title, hint, ta, btnRow);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  manualCopyOverlay = overlay;
+
+  overlay.onclick = (e) => {
+    if (e.target === overlay) {
+      overlay.remove();
+      manualCopyOverlay = null;
+    }
+  };
+
+  requestAnimationFrame(() => {
+    ta.focus();
+    ta.select();
+  });
+}
+
+/**
+ * Tries clipboard API → execCommand → modal fallback.
+ * Returns true only when the clipboard copy actually succeeded.
+ */
+export async function copyWithFallback(text: string): Promise<boolean> {
+  if (typeof navigator === "undefined") return false;
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through */
+  }
+
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "0";
+    ta.style.left = "0";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    if (ok) return true;
+  } catch {
+    /* fall through */
+  }
+
+  openManualCopyModal(text);
+  return false;
+}
+
+/** Backwards-compatible alias used by older call sites. */
+export async function copyToClipboard(text: string): Promise<boolean> {
+  return copyWithFallback(text);
+}
+
+/* ---------- Misc ---------- */
 export function debounce<Args extends unknown[]>(
   fn: (...args: Args) => void,
   delay = 300,
@@ -245,6 +345,7 @@ export function debounce<Args extends unknown[]>(
   };
 }
 
+/* ---------- Zod schemas & types ---------- */
 export const sessionSchema = z.object({
   token: z
     .string()
@@ -312,4 +413,4 @@ export function removeRecentRepo(owner: string, repo: string): RecentRepo[] {
   );
   writeJson("local", STORAGE_KEYS.recent, current);
   return current;
-    }
+}
